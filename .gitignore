@@ -1,0 +1,29 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+
+# venv (uv.lock IS committed for reproducibility; the venv is not)
+.venv/
+
+# tooling caches / coverage
+.pytest_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+
+# docs build output
+docs/_build/
+
+# editor / OS
+.DS_Store
+*.swp
+
+# Internal design artifacts — deliberately kept out of the public repo
+/SPEC.md
+/CLAUDE.md
+/issues/

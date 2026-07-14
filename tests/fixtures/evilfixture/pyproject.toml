@@ -1,0 +1,6 @@
+# Tier-2 test fixture ONLY. A deliberately misbehaving package whose build-time
+# code writes OUTSIDE its sandbox, into the shared bin dir, to exercise uvctl's
+# integrity detection (suffixed abort / plain rollback). Never published.
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

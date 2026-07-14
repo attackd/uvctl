@@ -1,0 +1,68 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Ruff lint (incl. D docstring rules)
+        run: uv run ruff check .
+      - name: Ruff format check
+        run: uv run ruff format --check .
+
+  unit:
+    # Tier 1: host-safe unit tests. Matrix spans the tomli-backport (3.9/3.10)
+    # and stdlib-tomllib (3.11/3.12) paths.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.9", "3.10", "3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+      - run: uv sync
+      - name: Unit tests
+        run: uv run pytest
+
+  dependency-policy:
+    # Stdlib-only runtime: no dependency beyond conditional tomli; no
+    # third-party runtime import (incl. packaging).
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync
+      - name: Dependency policy
+        run: uv run pytest tests/unit/test_dependency_policy.py -v
+
+  system:
+    # Tier 2: privileged/system tests run only inside the disposable container.
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        py-version: ["3.9", "3.10", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build tier-2 image
+        run: docker build -f docker/Dockerfile --build-arg PY_VERSION=${{ matrix.py-version }} -t uvctl-test .
+      - name: Run system tests
+        run: docker run --rm uvctl-test
+
+  docs:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+      - name: Build docs (warnings are errors)
+        run: uv run --extra docs sphinx-build -W docs docs/_build
