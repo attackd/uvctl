@@ -4,8 +4,11 @@ version = "0.0.0"
 description = "Manage shared `uv tool` installs for teams and shared servers, without running package code as root."
 readme = "README.md"
 requires-python = ">=3.9"
-license = { text = "MIT" }
+license = { text = "Apache-2.0" }
 authors = [{ name = "attackd" }]
+classifiers = [
+    "License :: OSI Approved :: Apache Software License",
+]
 
 # Dependency policy: runtime code is stdlib-only. The ONLY permitted runtime
 # dependency is the
