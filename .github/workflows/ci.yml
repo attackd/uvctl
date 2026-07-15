@@ -10,7 +10,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v8
       - run: uv sync
       - name: Ruff lint (incl. D docstring rules)
         run: uv run ruff check .
@@ -27,7 +27,7 @@ jobs:
         python-version: ["3.9", "3.10", "3.11", "3.12"]
     steps:
       - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v8
         with:
           python-version: ${{ matrix.python-version }}
       - run: uv sync
@@ -40,7 +40,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v8
       - run: uv sync
       - name: Dependency policy
         run: uv run pytest tests/unit/test_dependency_policy.py -v
@@ -63,6 +63,6 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v5
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v8
       - name: Build docs (warnings are errors)
         run: uv run --extra docs sphinx-build -W docs docs/_build
