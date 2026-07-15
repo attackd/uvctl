@@ -82,6 +82,13 @@ def test_env_output_escapes_shell_metacharacters():
 # --- cron_path_line: deterministic, shared dir last --------------------------
 
 
+def test_cron_snippet_warns_on_unsafe_bin_dir():
+    # a ':' or space in bin_dir would corrupt the crontab PATH line
+    assert "WARNING" in pathmgmt.cron_snippet("/opt/uv:evil")
+    assert "WARNING" in pathmgmt.cron_snippet("/opt/uv bin")
+    assert "WARNING" not in pathmgmt.cron_snippet("/opt/uv/bin")
+
+
 def test_cron_path_line_deterministic_and_trailing():
     line = pathmgmt.cron_path_line(BIN)
     assert line == (

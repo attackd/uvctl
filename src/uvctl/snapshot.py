@@ -44,6 +44,12 @@ _COMPARED_FIELDS = ("kind", "target", "size", "mode", "uid", "gid", "sha256")
 
 _READ_CHUNK = 1 << 16
 
+#: Regular files larger than this are not content-hashed. bin dir entries are
+#: tiny; a multi-gigabyte file dropped there by a hostile install hook is itself
+#: anomalous (it still appears in the diff via name/size), so refusing to hash it
+#: bounds the work an attacker can force during a snapshot.
+_MAX_HASH_BYTES = 64 * 1024 * 1024
+
 
 class SnapshotMutationError(RuntimeError):
     """Raised when a snapshot's fingerprint changes between capture and diff.
@@ -168,7 +174,9 @@ def _entry_for(path: str) -> Entry:
     elif stat.S_ISDIR(mode):
         kind, target, sha = "dir", None, None
     elif stat.S_ISREG(mode):
-        kind, target, sha = "file", None, _sha256(path)
+        # Cap hashing cost; oversized files still surface via name/size in diffs.
+        sha = _sha256(path) if st.st_size <= _MAX_HASH_BYTES else None
+        kind, target = "file", None
     else:
         kind, target, sha = "other", None, None
     return Entry(

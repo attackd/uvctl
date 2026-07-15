@@ -16,6 +16,19 @@ def _write(path, data=b"x"):
 # --- capture -----------------------------------------------------------------
 
 
+def test_oversized_file_is_not_hashed(tmp_path, monkeypatch):
+    # Files above the cap are recorded (name/size) but not content-hashed, so a
+    # giant dropped file can't force unbounded hashing work.
+    monkeypatch.setattr(snapshot, "_MAX_HASH_BYTES", 4)
+    small = tmp_path / "small"
+    small.write_bytes(b"ab")  # <= cap → hashed
+    big = tmp_path / "big"
+    big.write_bytes(b"abcdefgh")  # > cap → not hashed
+    snap = snapshot.Snapshot.capture([str(tmp_path)])
+    assert snap.entries[str(small)].sha256 is not None
+    assert snap.entries[str(big)].sha256 is None
+
+
 def test_capture_records_file_symlink_and_kinds(tmp_path):
     _write(tmp_path / "tool", b"binary-contents")
     os.symlink(tmp_path / "tool", tmp_path / "link")

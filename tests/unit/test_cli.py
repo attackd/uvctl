@@ -319,3 +319,40 @@ def test_should_drop_in_rootless_root_case():
 )
 def test_should_not_drop(override):
     assert cli.should_drop_privileges(**_drop_args(**override)) is False
+
+
+# --- _should_drop_for_command: read-only paths drop in ANY mode --------------
+
+
+@pytest.mark.parametrize(
+    ("cmd", "mode", "expected"),
+    [
+        # never-escalating commands drop whenever root, even in system-bin
+        ("run", "system-bin", True),
+        ("run", "rootless", True),
+        ("verify", "system-bin", True),
+        ("config", "system-bin", True),
+        ("env", "system-bin", True),
+        # install/forward keeps root in system-bin, drops in rootless
+        ("tool", "system-bin", False),
+        ("tool", "rootless", True),
+        # setup never drops
+        ("setup", "rootless", False),
+    ],
+)
+def test_should_drop_for_command(cmd, mode, expected):
+    assert (
+        cli._should_drop_for_command(
+            cmd, euid=0, service_user="uvctl", mode=mode, as_root=False
+        )
+        is expected
+    )
+
+
+def test_should_drop_for_command_not_root_or_no_user():
+    assert not cli._should_drop_for_command(
+        "run", euid=1000, service_user="uvctl", mode="system-bin", as_root=False
+    )
+    assert not cli._should_drop_for_command(
+        "run", euid=0, service_user=None, mode="rootless", as_root=False
+    )

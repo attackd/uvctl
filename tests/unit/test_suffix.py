@@ -312,3 +312,29 @@ def test_classify_expected_removed_entrypoint(tmp_path):
     post = snapshot.Snapshot.capture([str(bin_dir)])
     findings = suffix.classify_forwarded_changes(snapshot.diff(pre, post), env_dir)
     assert findings == ()
+
+
+def test_classify_finding_planted_symlink_wrong_name(tmp_path):
+    # A hook plants a symlink into the tool env under an ARBITRARY name (kubectl
+    # -> env/bin/black). It resolves inside the env, but the name doesn't match
+    # the entrypoint it points at, so it must be a finding, not "expected".
+    bin_dir, env_dir, target = _plain_setup(tmp_path)  # target = env/bin/black
+    pre = snapshot.Snapshot.capture([str(bin_dir)])
+    os.symlink(target, bin_dir / "kubectl")  # name/target mismatch
+    post = snapshot.Snapshot.capture([str(bin_dir)])
+    findings = suffix.classify_forwarded_changes(snapshot.diff(pre, post), env_dir)
+    assert [os.path.basename(c.path) for c in findings] == ["kubectl"]
+
+
+def test_classify_finding_symlink_into_env_but_not_bin(tmp_path):
+    # A symlink resolving into the env but NOT the canonical <env>/bin/<name>
+    # entrypoint is a finding.
+    bin_dir, env_dir, _ = _plain_setup(tmp_path)
+    stray = tmp_path / "tools" / "black" / "lib" / "evil"
+    stray.parent.mkdir(parents=True)
+    stray.write_text("x")
+    pre = snapshot.Snapshot.capture([str(bin_dir)])
+    os.symlink(stray, bin_dir / "black")
+    post = snapshot.Snapshot.capture([str(bin_dir)])
+    findings = suffix.classify_forwarded_changes(snapshot.diff(pre, post), env_dir)
+    assert len(findings) == 1

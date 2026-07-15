@@ -40,6 +40,27 @@ def test_render_config_toml_round_trips():
 # --- render_sudoers_fragment -------------------------------------------------
 
 
+@pytest.mark.parametrize("name", ["uvctl", "uvctl-admins", "svc_user", "u1"])
+def test_validate_principal_name_accepts_valid(name):
+    assert setup.validate_principal_name(name, "test") == name
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "",
+        "admins ALL=(ALL) NOPASSWD: ALL #",  # sudoers-rule injection attempt
+        "bad name",
+        "has/slash",
+        "-leading-dash",
+        "x" * 40,  # too long
+    ],
+)
+def test_validate_principal_name_rejects_unsafe(name):
+    with pytest.raises(setup.SetupError):
+        setup.validate_principal_name(name, "test")
+
+
 def test_render_sudoers_fragment_shape():
     # Authorizes running uvctl itself as the service user (whole-process model).
     fragment = setup.render_sudoers_fragment(

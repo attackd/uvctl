@@ -19,6 +19,7 @@ import argparse
 import grp
 import os
 import pwd
+import re
 import shutil
 import subprocess
 import sys
@@ -38,6 +39,32 @@ DEFAULT_ADMIN_GROUP = "uvctl-admins"
 _DIR_MODE = 0o755
 _CONFIG_MODE = 0o644
 _SUDOERS_MODE = 0o440
+
+#: Conservative POSIX-ish name for a user or group. Enforced before a name is
+#: interpolated into a sudoers fragment, so a crafted value cannot smuggle in a
+#: syntactically-valid-but-broader sudoers rule (``visudo -cf`` checks syntax,
+#: not intent).
+_PRINCIPAL_NAME = re.compile(r"\A[A-Za-z0-9_][A-Za-z0-9_-]{0,31}\Z")
+
+
+def validate_principal_name(name: str, kind: str) -> str:
+    """Validate a service-user or admin-group name against a safe charset.
+
+    Args:
+        name: The user/group name to check.
+        kind: A label for error messages (e.g. ``"service user"``).
+
+    Returns:
+        ``name`` unchanged, once proven safe.
+
+    Raises:
+        SetupError: If ``name`` is empty or contains characters outside a
+            conservative POSIX name charset.
+    """
+    if not _PRINCIPAL_NAME.match(name):
+        raise SetupError(f"unsafe {kind} name: {name!r}")
+    return name
+
 
 #: Root-owned system bin directories that select system-bin mode when chosen as
 #: ``bin_dir`` (uvctl must not chown these to the service user).
@@ -176,6 +203,7 @@ def resolve_effective(ns: argparse.Namespace, cfg: config_mod.Config) -> dict[st
     service_user = ns.service_user or cfg.service_user.value
     if not service_user:
         raise SetupError("a service user is required (pass --service-user)")
+    validate_principal_name(service_user, "service user")
     return {
         "tool_dir": ns.tool_dir or cfg.tool_dir.value,
         "bin_dir": ns.bin_dir or cfg.bin_dir.value,
@@ -339,6 +367,7 @@ def main(argv: list[str]) -> int:
             PROFILE_D_PATH, pathmgmt.profile_d_snippet(eff["bin_dir"]), _CONFIG_MODE
         )
         if ns.write_sudoers:
+            validate_principal_name(ns.admin_group, "admin group")
             _ensure_admin_group(ns.admin_group)
             uvctl_path = os.path.realpath(shutil.which("uvctl") or sys.argv[0])
             _write_sudoers(ns.admin_group, eff["service_user"], uvctl_path)

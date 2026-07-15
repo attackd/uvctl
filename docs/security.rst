@@ -119,7 +119,11 @@ offers to modify it.
 Before any recursive delete, the target is resolved with ``realpath`` and must
 be a real directory strictly inside ``<tool_dir>/.suffixed/`` and not itself a
 symlink. Uninstall removes only ``bin_dir`` symlinks whose targets resolve
-inside the matching scratch dir (target-based matching, never by name).
+inside the matching scratch dir (target-based matching, never by name). The
+recursive delete runs **as the service user** (the scratch tree's owner), never
+as root — so even in system-bin mode a check-to-use race cannot redirect a
+privileged ``rm`` outside the tree; the worst an attacker who wins the race
+achieves is deleting something the service user could already delete.
 
 10. Integrity checking
 ----------------------
@@ -140,9 +144,13 @@ monitored principal could actually have done.
 writes only to the out-of-scope scratch tree, so any in-scope change is a
 finding and **fails closed** — links nothing, no ledger entry, scratch cleaned
 up. **Plain installs** use a two-point snapshot with **target-based
-attribution**: a created/retargeted symlink resolving into
-``<tool_dir>/<normalized_pkg>/`` (or a deletion of one that did — upgrades
-clearing stale entrypoints) is expected; anything else is a finding. uv has
+attribution**: a created/retargeted symlink is expected only when it is a
+*canonical* uv entrypoint — resolving to exactly ``<tool_env>/bin/<same
+basename>`` (or a deletion of one that did — upgrades clearing stale
+entrypoints). This name-matched form is deliberate: attributing *any* symlink
+that merely resolves somewhere inside the env would let a build hook plant an
+arbitrarily-named entrypoint (``bin/kubectl`` -> ``env/bin/evil``) and have it
+pass as expected. Anything else is a finding. uv has
 already linked by then, so the fail-closed analog is: report, best-effort
 rollback (``uv tool uninstall``), non-zero exit. **Plain uninstalls** apply the
 same classifier (expected = deletions resolving into the tool's env); on

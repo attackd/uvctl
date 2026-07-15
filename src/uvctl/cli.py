@@ -375,26 +375,55 @@ def should_drop_privileges(
     return mode == config_mod.ROOTLESS
 
 
+#: Never-escalating subcommands: they need no root and (``run``) exec in-process
+#: with no child to drop, so they drop unconditionally when invoked as root —
+#: independent of mode. This also closes the vector where an attacker who can
+#: influence the environment forces system-bin detection to suppress the drop.
+_NEVER_ESCALATE = frozenset({"config", "env", "run", "verify"})
+
+
+def _should_drop_for_command(
+    cmd: str, *, euid: int, service_user: str | None, mode: str | None, as_root: bool
+) -> bool:
+    """Whether to drop to the service user at startup, given the subcommand.
+
+    Read-only, never-escalating commands drop whenever running as root; install/
+    uninstall/forward paths keep root in system-bin (their narrow steps need it)
+    and drop only in rootless. ``setup`` never drops.
+    """
+    if euid != 0 or not service_user or cmd == "setup":
+        return False
+    if cmd in _NEVER_ESCALATE:
+        return True
+    return should_drop_privileges(
+        euid=euid,
+        is_setup=False,
+        as_root=as_root,
+        service_user=service_user,
+        mode=mode,
+    )
+
+
 def _maybe_drop_privileges(argv: list[str]) -> None:
-    """Perform the one-time rootless startup drop, if applicable.
+    """Perform the one-time startup privilege drop, if applicable.
 
     Reads the root-owned config (a trusted read, the one thing legitimately done
-    at uid 0), detects the mode, and — in the rootless invariant case —
-    irrevocably drops the whole process to the service user before any other
-    logic runs. ``SUDO_USER`` remains in the environment for ledger attribution.
+    at uid 0), detects the mode, and irrevocably drops the whole process to the
+    service user before any other logic runs. ``SUDO_USER`` remains in the
+    environment for ledger attribution.
     """
     if os.geteuid() != 0:
         return
-    is_setup = bool(argv) and argv[0] == "setup"
+    cmd = argv[0] if argv else ""
     as_root = wants_root(argv, dict(os.environ))
     cfg = config_mod.resolve()
     mode, _ = _detect_mode(cfg)
-    if should_drop_privileges(
+    if _should_drop_for_command(
+        cmd,
         euid=os.geteuid(),
-        is_setup=is_setup,
-        as_root=as_root,
         service_user=cfg.service_user.value,
         mode=mode,
+        as_root=as_root,
     ):
         escalate.drop_privileges_permanently(cfg.service_user.value)
 
@@ -735,16 +764,15 @@ def main_uvxg(argv: list[str] | None = None) -> int:
     """
     argv = list(sys.argv[1:] if argv is None else argv)
     cfg = config_mod.resolve()
-    # uvxg never escalates; if it was invoked as root in rootless mode, drop so
-    # the tool does not run as uid 0 either.
-    if os.geteuid() == 0:
-        mode, _ = _detect_mode(cfg)
-        if cfg.service_user.value and mode == config_mod.ROOTLESS:
-            try:
-                escalate.drop_privileges_permanently(cfg.service_user.value)
-            except escalate.EscalationError as exc:
-                print(f"uvxg: error: {exc}", file=sys.stderr)
-                return 1
+    # uvxg never escalates; if it was invoked as root, drop to the service user
+    # so the tool does not run as uid 0 — in ANY mode (uvxg needs no root, and
+    # this closes the env-induced-system-bin drop-suppression vector).
+    if os.geteuid() == 0 and cfg.service_user.value:
+        try:
+            escalate.drop_privileges_permanently(cfg.service_user.value)
+        except escalate.EscalationError as exc:
+            print(f"uvxg: error: {exc}", file=sys.stderr)
+            return 1
     uv_path = cfg.uv_path.value
     if not uv_path or not os.path.exists(uv_path):
         print("uvxg: error: uv not found; run `uvctl setup`", file=sys.stderr)

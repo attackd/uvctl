@@ -208,15 +208,28 @@ def plain_tool_env_dir(tool_dir: str, normalized_name: str) -> str:
     return os.path.join(tool_dir, normalized_name)
 
 
-def _target_inside(link_path: str, target: str | None, tool_env_dir: str) -> bool:
-    """Whether a symlink's recorded target resolves inside ``tool_env_dir``."""
+def _is_canonical_entrypoint(
+    link_path: str, target: str | None, tool_env_dir: str
+) -> bool:
+    """Whether a ``bin_dir`` symlink is a canonical uv entrypoint for this tool.
+
+    uv links ``<bin_dir>/<exe>`` -> ``<tool_env_dir>/bin/<exe>`` for each of the
+    tool's console scripts. Requiring that exact shape (the resolved target is
+    ``<env>/bin/<same basename>``) prevents a malicious build hook from planting
+    an arbitrarily-named symlink into its own env (e.g. ``bin/kubectl`` ->
+    ``env/bin/evil``) and having it pass as an expected change. Anything that
+    merely resolves *somewhere* inside the env, but is not the canonical
+    name-matched entrypoint, is treated as a finding.
+    """
     if target is None:
         return False
     if not os.path.isabs(target):
         target = os.path.join(os.path.dirname(link_path), target)
     real = os.path.realpath(target)
-    env = os.path.realpath(tool_env_dir)
-    return real == env or real.startswith(env + os.sep)
+    expected = os.path.join(
+        os.path.realpath(tool_env_dir), "bin", os.path.basename(link_path)
+    )
+    return real == expected
 
 
 def classify_forwarded_changes(changes: tuple, tool_env_dir: str) -> tuple:
@@ -247,14 +260,14 @@ def classify_forwarded_changes(changes: tuple, tool_env_dir: str) -> tuple:
             attributable = (
                 entry is not None
                 and entry.kind == "symlink"
-                and _target_inside(change.path, entry.target, tool_env_dir)
+                and _is_canonical_entrypoint(change.path, entry.target, tool_env_dir)
             )
         elif change.kind == "removed":
             entry = change.before
             attributable = (
                 entry is not None
                 and entry.kind == "symlink"
-                and _target_inside(change.path, entry.target, tool_env_dir)
+                and _is_canonical_entrypoint(change.path, entry.target, tool_env_dir)
             )
         else:
             attributable = False
@@ -339,10 +352,19 @@ def _remove_path(mode: str, path: str) -> None:
         os.remove(path)
 
 
-def _remove_tree(mode: str, path: str) -> None:
-    """Remove a scratch directory tree (guards already checked by the caller)."""
+def _remove_tree(mode: str, path: str, service_user: str | None) -> None:
+    """Remove a scratch tree **as the service user** (guards checked by caller).
+
+    The scratch tree lives under ``tool_dir`` and is service-user-owned in both
+    modes, so root is never needed to delete it. Doing it as root (as the code
+    once did in system-bin mode) both violates the narrow-root principle and
+    opens a TOCTOU window in which a service-user-level actor could swap a path
+    component and redirect a root ``rm -rf`` outside the tree. Deleting as the
+    owner keeps the blast radius to what the service user could already remove.
+    """
     if mode == config_mod.SYSTEM_BIN:
-        escalate.run_as_root(["rm", "-rf", path])
+        # Process is still root here; drop to the service user for the delete.
+        escalate.run_as_service_user(["rm", "-rf", path], service_user=service_user)
     else:
         shutil.rmtree(path)
 
@@ -371,7 +393,7 @@ def _safe_cleanup_scratch(
         return
     try:
         assert_deletion_safe(scratch_tool_dir, cfg.tool_dir.value)
-        _remove_tree(mode, scratch_tool_dir)
+        _remove_tree(mode, scratch_tool_dir, cfg.service_user.value)
     except SuffixError as exc:
         print(f"uvctl: could not clean up {scratch_tool_dir}: {exc}", file=sys.stderr)
 
@@ -592,7 +614,7 @@ def uninstall(cfg: config_mod.Config, args: list[str], suffix: str) -> int:
             _remove_path(mode, link)
 
     assert_deletion_safe(scratch_tool_dir, cfg.tool_dir.value)
-    _remove_tree(mode, scratch_tool_dir)
+    _remove_tree(mode, scratch_tool_dir, cfg.service_user.value)
 
     _assert_ledger_write_allowed(mode)
     ledger.mark_removed(name, suffix)

@@ -175,6 +175,12 @@ _CRON_HEADER = (
 def cron_snippet(bin_dir: str) -> str:
     """Return the full commented crontab block for ``uvctl env --cron``.
 
+    A crontab ``PATH=`` line is not shell and cannot be quoted, so a ``bin_dir``
+    containing whitespace or a ``:`` would silently corrupt the line (a ``:``
+    would split it into two entries). Such a value only arises via a hostile
+    ``UVCTL_TOOL_BIN_DIR`` override; a warning comment is prepended so the
+    breakage is visible rather than silent.
+
     Args:
         bin_dir: The shared bin directory (placed last in the PATH line).
 
@@ -182,4 +188,11 @@ def cron_snippet(bin_dir: str) -> str:
         The comment header followed by the deterministic PATH line, ending in a
         newline.
     """
-    return _CRON_HEADER + cron_path_line(bin_dir) + "\n"
+    warning = ""
+    if any(ch in bin_dir for ch in " \t\n\r:"):
+        warning = (
+            "# WARNING: the shared bin dir contains whitespace or ':'; the PATH "
+            "line below is malformed. Fix bin_dir (or the UVCTL_TOOL_BIN_DIR "
+            "override) before using.\n"
+        )
+    return warning + _CRON_HEADER + cron_path_line(bin_dir) + "\n"
